@@ -1,0 +1,124 @@
+module tcp_syn_response {
+    import from TCP_Types all;
+    import from IP_Types all;
+    import from LANL2asp_Types all;
+    import from LANL2asp_PortType all;
+    import from General_Types all;
+
+    modulepar {
+        charstring srcIpAddr := "127.0.0.1";
+        charstring dstIpAddr := "127.0.0.1";
+        OCT6 dstMacAddr := 'ffffffffffff'O;
+        integer srcPort := 9999;
+        integer dstPort := 10000;
+    }
+
+    testcase tc_TCP_SYN_response() runs on LOCAL {
+        map(self:P, system:P);
+        P.send(t_PDU_TCP_SYN);
+        setverdict(pass);
+        stop;
+    }
+
+    template PDU_TCP t_PDU_TCP_SYN := {
+        source_port := srcPort,
+        dest_port := dstPort,
+        sequence_number := 42,
+        acknowledgment_number := 1,
+        data_offset := 0,
+        reserved := '000000'B,
+        control_bits := TCP_Control_bits_SYN,
+        window := 65535,
+        checksum := '0000'O,
+        urgent_pointer := 0,
+        options := omit,
+        data := omit
+    }
+
+    template TCP_Control_bits TCP_Control_bits_SYN := {
+        urg := '0'B,
+        ack := '0'B,
+        psh := '0'B,
+        rst := '0'B,
+        syn := '1'B,
+        fin := '0'B
+    }
+
+    type component LOCAL {
+        port TcpPort P;
+    }
+
+    type port TcpPort message {
+        inout PDU_TCP;
+    } with {
+        extension "user LANL2asp_PT
+            out(
+                PDU_TCP -> ASP_LANL2: function(enc_PDU_TCP)
+            )
+            in(
+                ASP_LANL2             -> PDU_TCP: function(dec_ASP_LANL2),
+                                               -: discard;
+                ASP_v2_LANL2          ->       -: discard;
+                ASP_LANL2_open_result ->       -: discard;
+                ASP_LANL2_Error       ->       -: discard;
+                ASP_v2_LANL2_Error    ->       -: discard
+            )
+            "
+    }
+
+    function enc_PDU_TCP(in PDU_TCP tcp) return ASP_LANL2 {
+        var IPv4_packet v_IPv4_packet;
+        v_IPv4_packet.header := valueof(t_IPv4_header);
+        v_IPv4_packet.ext_headers := omit;
+        v_IPv4_packet.payload := f_enc_PDU_TCP(f_IPv4_addr_enc(srcIpAddr), f_IPv4_addr_enc(dstIpAddr), tcp);
+
+        var octetstring eth_payload := f_IPv4_enc_eth(v_IPv4_packet);
+        var OCT2 checksum := f_IPv4_checksum(eth_payload);
+        eth_payload[10] := checksum[0];
+        eth_payload[11] := checksum[1];
+
+        var ASP_LANL2 v_ASP_LANL2;
+        v_ASP_LANL2.type_field := '0800'O;
+        v_ASP_LANL2.eth_dst_addr := dstMacAddr;
+        v_ASP_LANL2.eth_src_addr := omit;
+        v_ASP_LANL2.payload := eth_payload;
+
+        return v_ASP_LANL2;
+    } with {
+        extension "prototype(convert)"
+    }
+
+    template IPv4_header t_IPv4_header := {
+        ver := 4,
+        hlen := 5,
+        tos := 0,
+        tlen := 0, // calculated
+        id := 0,
+        res := '0'B,
+        dfrag := '0'B,
+        mfrag := '0'B,
+        foffset := 0,
+        ttl := 64,
+        proto := 6, // TCP
+        cksum := 0, // updated later
+        srcaddr := f_IPv4_addr_enc(srcIpAddr),
+        dstaddr := f_IPv4_addr_enc(dstIpAddr)
+    }
+
+    function dec_ASP_LANL2(in ASP_LANL2 eth, out PDU_TCP tcp) return integer {
+        var PDU_TCP v_PDU_TCP;
+        var IPv4_packet v_IPv4_packet := f_IPv4_dec(eth.payload);
+        if (v_IPv4_packet.header.proto == 6) { // TCP
+            v_PDU_TCP := f_dec_PDU_TCP(v_IPv4_packet.payload);
+            tcp := v_PDU_TCP;
+            return 0;
+        }
+        return -1;
+    } with {
+        extension "prototype(backtrack)"
+    }
+
+    control {
+        execute(tc_TCP_SYN_response());
+    }
+}
