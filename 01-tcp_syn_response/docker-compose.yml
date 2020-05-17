@@ -1,0 +1,32 @@
+---
+version: '2.2'
+services:
+  mc:
+    build: .
+    container_name: mc
+    hostname: mc
+    command: ["/home/titan/test_in_container.conf"]
+    volumes:
+      - ./test_in_container.conf:/home/titan/test_in_container.conf
+    networks:
+      test:
+        ipv4_address: 192.168.127.99
+    mac_address: "02:02:c0:a8:7f:63"
+    depends_on:
+      - sut
+  sut:
+    image: alpine
+    container_name: sut
+    hostname: sut
+    command: ['/usr/bin/nc', '-l', '-p', '10000']
+    networks:
+      test:
+        ipv4_address: 192.168.127.100
+    mac_address: "02:02:c0:a8:7f:64"
+networks:
+  test:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.127.0/24
+          gateway: 192.168.127.1
