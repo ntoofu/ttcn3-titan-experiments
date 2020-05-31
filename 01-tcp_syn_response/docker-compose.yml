@@ -12,6 +12,8 @@ services:
       test:
         ipv4_address: 192.168.127.99
     mac_address: "02:02:c0:a8:7f:63"
+    cap_add:
+      - NET_ADMIN
     depends_on:
       - sut
   sut:

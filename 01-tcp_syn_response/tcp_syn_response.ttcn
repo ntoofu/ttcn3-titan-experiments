@@ -13,10 +13,22 @@ module tcp_syn_response {
         integer dstPort := 10000;
     }
 
-    testcase tc_TCP_SYN_response() runs on LOCAL {
-        map(self:P, system:P);
-        P.send(t_PDU_TCP_SYN);
-        setverdict(pass);
+    testcase tc_TCP_SYN_response() runs on MTC system LOCAL {
+        timer timer_from_syn := 10.0;
+        map(self:Tcp_P, system:Eth_P);
+        Tcp_P.send(t_PDU_TCP_SYN);
+        timer_from_syn.start;
+        alt {
+            [] Tcp_P.receive(t_PDU_TCP_SYN_resp_SYNACK) {
+                setverdict(pass);
+            }
+            [] Tcp_P.receive {
+                setverdict(fail);
+            }
+            [] timer_from_syn.timeout {
+                setverdict(inconc);
+            }
+        }
         stop;
     }
 
@@ -44,29 +56,54 @@ module tcp_syn_response {
         fin := '0'B
     }
 
+    template PDU_TCP t_PDU_TCP_SYN_resp_SYNACK := {
+        source_port := dstPort,
+        dest_port := srcPort,
+        sequence_number := ?,
+        acknowledgment_number := 43,
+        data_offset := ?,
+        reserved := '000000'B,
+        control_bits := TCP_Control_bits_SYNACK,
+        window := ?,
+        checksum := ?,
+        urgent_pointer := 0,
+        options := ?,
+        data := ?
+    }
+
+    template TCP_Control_bits TCP_Control_bits_SYNACK := {
+        urg := '0'B,
+        ack := '1'B,
+        psh := '0'B,
+        rst := '0'B,
+        syn := '1'B,
+        fin := '0'B
+    }
+
+    type component MTC {
+        port TcpPort Tcp_P;
+    }
+
     type component LOCAL {
-        port TcpPort P;
+        port LANL2asp_PT Eth_P;
     }
 
-    type port TcpPort message {
-        inout PDU_TCP;
-    } with {
-        extension "user LANL2asp_PT
-            out(
-                PDU_TCP -> ASP_LANL2: function(enc_PDU_TCP)
-            )
-            in(
-                ASP_LANL2             -> PDU_TCP: function(dec_ASP_LANL2),
-                                               -: discard;
-                ASP_v2_LANL2          ->       -: discard;
-                ASP_LANL2_open_result ->       -: discard;
-                ASP_LANL2_Error       ->       -: discard;
-                ASP_v2_LANL2_Error    ->       -: discard
-            )
-            "
+    type record Bool3 {
+        boolean bool
     }
 
-    function enc_PDU_TCP(in PDU_TCP tcp) return ASP_LANL2 {
+    type record Bool4 {
+        boolean bool
+    }
+
+    type port TcpPort message map to LANL2asp_PT {
+        in PDU_TCP from ASP_v2_LANL2 with dec_ASP_v2_LANL2();
+        out PDU_TCP to ASP_LANL2 with enc_PDU_TCP();
+        in Bool3, Bool4;
+        in ASP_LANL2_Error, ASP_LANL2_open_result, ASP_LANL2, ASP_v2_LANL2_Error;
+    }
+
+    function enc_PDU_TCP(in PDU_TCP tcp, out ASP_LANL2 eth) {
         var IPv4_packet v_IPv4_packet;
         v_IPv4_packet.header := valueof(t_IPv4_header);
         v_IPv4_packet.ext_headers := omit;
@@ -83,9 +120,10 @@ module tcp_syn_response {
         v_ASP_LANL2.eth_src_addr := omit;
         v_ASP_LANL2.payload := eth_payload;
 
-        return v_ASP_LANL2;
+        eth := v_ASP_LANL2;
+        port.setstate(0);
     } with {
-        extension "prototype(convert)"
+        extension "prototype(fast)"
     }
 
     template IPv4_header t_IPv4_header := {
@@ -105,17 +143,38 @@ module tcp_syn_response {
         dstaddr := f_IPv4_addr_enc(dstIpAddr)
     }
 
-    function dec_ASP_LANL2(in ASP_LANL2 eth, out PDU_TCP tcp) return integer {
+    function dec_ASP_LANL2(in ASP_LANL2 eth, out PDU_TCP tcp) {
+        log("dec_ASP_LANL2");
         var PDU_TCP v_PDU_TCP;
         var IPv4_packet v_IPv4_packet := f_IPv4_dec(eth.payload);
         if (v_IPv4_packet.header.proto == 6) { // TCP
+            log("TCP");
             v_PDU_TCP := f_dec_PDU_TCP(v_IPv4_packet.payload);
             tcp := v_PDU_TCP;
-            return 0;
+            port.setstate(0);
+            return;
         }
-        return -1;
+        log("not TCP");
+        port.setstate(1);
     } with {
-        extension "prototype(backtrack)"
+        extension "prototype(fast)"
+    }
+
+    function dec_ASP_v2_LANL2(in ASP_v2_LANL2 eth, out PDU_TCP tcp) {
+        log("dec_ASP_v2_LANL2");
+        var PDU_TCP v_PDU_TCP;
+        var IPv4_packet v_IPv4_packet := f_IPv4_dec(eth.payload);
+        if (v_IPv4_packet.header.proto == 6) { // TCP
+            log("TCP");
+            v_PDU_TCP := f_dec_PDU_TCP(v_IPv4_packet.payload);
+            tcp := v_PDU_TCP;
+            port.setstate(0);
+            return;
+        }
+        log("not TCP");
+        port.setstate(1);
+    } with {
+        extension "prototype(fast)"
     }
 
     control {
