@@ -68,7 +68,7 @@ module tcp_syn_response {
         checksum := ?,
         urgent_pointer := 0,
         options := ?,
-        data := ?
+        data := omit
     }
 
     template TCP_Control_bits TCP_Control_bits_SYNACK := {
@@ -97,10 +97,10 @@ module tcp_syn_response {
     }
 
     type port TcpPort message map to LANL2asp_PT {
-        in PDU_TCP from ASP_v2_LANL2 with dec_ASP_v2_LANL2();
+        in PDU_TCP from ASP_LANL2 with dec_ASP_LANL2();
         out PDU_TCP to ASP_LANL2 with enc_PDU_TCP();
         in Bool3, Bool4;
-        in ASP_LANL2_Error, ASP_LANL2_open_result, ASP_LANL2, ASP_v2_LANL2_Error;
+        in ASP_LANL2_Error, ASP_LANL2_open_result, ASP_v2_LANL2, ASP_v2_LANL2_Error;
     }
 
     function enc_PDU_TCP(in PDU_TCP tcp, out ASP_LANL2 eth) {
