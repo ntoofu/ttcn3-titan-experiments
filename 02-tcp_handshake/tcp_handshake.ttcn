@@ -1,0 +1,374 @@
+module tcp_handshake {
+    import from TCP_Types all;
+    import from IP_Types all;
+    import from LANL2asp_Types all;
+    import from LANL2asp_PortType all;
+    import from General_Types all;
+
+    modulepar {
+        charstring clientIpAddr := "127.0.0.1";
+        charstring serverIpAddr := "127.0.0.1";
+        OCT6 clientMacAddr := 'ffffffffffff'O;
+        OCT6 serverMacAddr := 'ffffffffffff'O;
+        integer clientPort := 10001;
+        integer serverPort := 10002;
+    }
+
+    testcase tc_TCP_handshake() runs on MTC system EthPeer {
+        var PTC PTC1 := PTC.create("client", "ptc1");
+        var PTC PTC2 := PTC.create("server", "ptc2");
+        connect(self:CP1, PTC1:CP);
+        connect(self:CP2, PTC2:CP);
+        var IpConf client_ip_conf := {
+            src_ip_addr := f_IPv4_addr_enc(clientIpAddr),
+            dst_ip_addr := f_IPv4_addr_enc(serverIpAddr),
+            dst_mac_addr := serverMacAddr
+        };
+        var IpConf server_ip_conf := {
+            src_ip_addr := f_IPv4_addr_enc(serverIpAddr),
+            dst_ip_addr := f_IPv4_addr_enc(clientIpAddr),
+            dst_mac_addr := clientMacAddr
+        };
+        map(PTC1:Tcp_P, system:Eth_1);
+        map(PTC2:Tcp_P, system:Eth_2);
+        PTC1.start(PTC_bypass_msg());
+        PTC2.start(PTC_bypass_msg());
+        CP1.send(client_ip_conf);
+        CP2.send(server_ip_conf);
+
+        timer timer_from_syn := 10.0;
+        timer timer_from_synack := 10.0;
+        timer timer_from_ack := 10.0;
+        CP1.send(t_PDU_TCP_SYN);
+        timer_from_syn.start;
+        alt {
+            [] CP2.receive(t_PDU_TCP_SYN_expect) {
+                CP2.send(t_PDU_TCP_SYNACK);
+                timer_from_synack.start;
+            }
+            [] CP2.receive {
+                setverdict(fail);
+                stop;
+            }
+            [] timer_from_syn.timeout {
+                setverdict(inconc);
+                stop;
+            }
+        }
+        alt {
+            [] CP1.receive(t_PDU_TCP_SYNACK_expect) {
+                CP1.send(t_PDU_TCP_ACK);
+                timer_from_ack.start;
+            }
+            [] CP1.receive {
+                setverdict(fail);
+                stop;
+            }
+            [] timer_from_synack.timeout {
+                setverdict(inconc);
+                stop;
+            }
+        }
+        alt {
+            [] CP2.receive(t_PDU_TCP_ACK_expect) {
+                setverdict(pass);
+            }
+            [] CP2.receive {
+                setverdict(fail);
+                stop;
+            }
+            [] timer_from_ack.timeout {
+                setverdict(inconc);
+                stop;
+            }
+        }
+
+        stop;
+    }
+
+    function PTC_bypass_msg() runs on PTC {
+        var PDU_TCP tcp_rx, tcp_tx;
+        var IpConf ip_conf;
+        alt {
+            [] CP.receive(t_ip_conf_any) -> value ip_conf {
+                Tcp_P.send(ip_conf);
+                repeat;
+            }
+            [] Tcp_P.receive(t_PDU_TCP_any) -> value tcp_rx {
+                CP.send(tcp_rx);
+                repeat;
+            }
+            [] CP.receive(t_PDU_TCP_any) -> value tcp_tx {
+                Tcp_P.send(tcp_tx);
+                repeat;
+            }
+        }
+    }
+
+    template IpConf t_ip_conf_any := {
+        src_ip_addr := ?,
+        dst_ip_addr := ?,
+        dst_mac_addr := ?
+    }
+
+    template PDU_TCP t_PDU_TCP_any := {
+        source_port := ?,
+        dest_port := ?,
+        sequence_number := ?,
+        acknowledgment_number := ?,
+        data_offset := ?,
+        reserved := ?,
+        control_bits := ?,
+        window := ?,
+        checksum := ?,
+        urgent_pointer := ?,
+        options := omit,
+        data := omit
+    }
+
+    template PDU_TCP t_PDU_TCP_SYN := {
+        source_port := clientPort,
+        dest_port := serverPort,
+        sequence_number := 42,
+        acknowledgment_number := 1,
+        data_offset := 0,
+        reserved := '000000'B,
+        control_bits := TCP_Control_bits_SYN,
+        window := 65535,
+        checksum := '0000'O,
+        urgent_pointer := 0,
+        options := omit,
+        data := omit
+    }
+
+    template PDU_TCP t_PDU_TCP_SYN_expect := {
+        source_port := clientPort,
+        dest_port := serverPort,
+        sequence_number := 42,
+        acknowledgment_number := 1,
+        data_offset := ?,
+        reserved := '000000'B,
+        control_bits := TCP_Control_bits_SYN,
+        window := 65535,
+        checksum := ?,
+        urgent_pointer := 0,
+        options := omit,
+        data := omit
+    }
+
+    template TCP_Control_bits TCP_Control_bits_SYN := {
+        urg := '0'B,
+        ack := '0'B,
+        psh := '0'B,
+        rst := '0'B,
+        syn := '1'B,
+        fin := '0'B
+    }
+
+    template PDU_TCP t_PDU_TCP_SYNACK := {
+        source_port := serverPort,
+        dest_port := clientPort,
+        sequence_number := 114514,
+        acknowledgment_number := 43,
+        data_offset := 0,
+        reserved := '000000'B,
+        control_bits := TCP_Control_bits_SYNACK,
+        window := 32767,
+        checksum := '0000'O,
+        urgent_pointer := 0,
+        options := omit,
+        data := omit
+    }
+
+    template PDU_TCP t_PDU_TCP_SYNACK_expect := {
+        source_port := serverPort,
+        dest_port := clientPort,
+        sequence_number := 114514,
+        acknowledgment_number := 43,
+        data_offset := ?,
+        reserved := '000000'B,
+        control_bits := TCP_Control_bits_SYNACK,
+        window := 32767,
+        checksum := ?,
+        urgent_pointer := 0,
+        options := omit,
+        data := omit
+    }
+
+    template TCP_Control_bits TCP_Control_bits_SYNACK := {
+        urg := '0'B,
+        ack := '1'B,
+        psh := '0'B,
+        rst := '0'B,
+        syn := '1'B,
+        fin := '0'B
+    }
+
+    template PDU_TCP t_PDU_TCP_ACK := {
+        source_port := clientPort,
+        dest_port := serverPort,
+        sequence_number := 43,
+        acknowledgment_number := 114515,
+        data_offset := 0,
+        reserved := '000000'B,
+        control_bits := TCP_Control_bits_ACK,
+        window := 65535,
+        checksum := '0000'O,
+        urgent_pointer := 0,
+        options := omit,
+        data := omit
+    }
+
+    template PDU_TCP t_PDU_TCP_ACK_expect := {
+        source_port := clientPort,
+        dest_port := serverPort,
+        sequence_number := 43,
+        acknowledgment_number := 114515,
+        data_offset := ?,
+        reserved := '000000'B,
+        control_bits := TCP_Control_bits_ACK,
+        window := 65535,
+        checksum := ?,
+        urgent_pointer := 0,
+        options := omit,
+        data := omit
+    }
+
+    template TCP_Control_bits TCP_Control_bits_ACK := {
+        urg := '0'B,
+        ack := '1'B,
+        psh := '0'B,
+        rst := '0'B,
+        syn := '0'B,
+        fin := '0'B
+    }
+
+    type component MTC {
+        port TCP_PT CP1;
+        port TCP_PT CP2;
+    }
+
+    type component PTC {
+        port TCP_PT CP;
+        port TcpPort Tcp_P;
+    }
+
+    type component EthPeer {
+        port LANL2asp_PT Eth_1;
+        port LANL2asp_PT Eth_2;
+    }
+
+    type port TCP_PT message {
+        inout PDU_TCP, IpConf
+    } with {
+        extension "internal"
+    }
+
+    type record IpConf {
+        octetstring src_ip_addr,
+        octetstring dst_ip_addr,
+        octetstring dst_mac_addr
+    }
+
+    type port TcpPort message map to LANL2asp_PT {
+        in PDU_TCP from ASP_LANL2 with dec_ASP_LANL2();
+        out PDU_TCP to ASP_LANL2 with enc_PDU_TCP();
+        out IpConf to ASP_LANL2 with f_set_ip_conf();
+        in ASP_LANL2_Error, ASP_LANL2_open_result, ASP_v2_LANL2, ASP_v2_LANL2_Error;
+        var IpConf ip_conf;
+    }
+
+    function enc_PDU_TCP(in PDU_TCP tcp, out ASP_LANL2 eth) port TcpPort {
+        var IPv4_packet v_IPv4_packet;
+        v_IPv4_packet.header := {
+            ver := 4,
+            hlen := 5,
+            tos := 0,
+            tlen := 0, // calculated
+            id := 0,
+            res := '0'B,
+            dfrag := '0'B,
+            mfrag := '0'B,
+            foffset := 0,
+            ttl := 64,
+            proto := 6, // TCP
+            cksum := 0, // updated later
+            srcaddr := ip_conf.src_ip_addr,
+            dstaddr := ip_conf.dst_ip_addr
+        }
+        v_IPv4_packet.ext_headers := omit;
+        v_IPv4_packet.payload := f_enc_PDU_TCP(ip_conf.src_ip_addr, ip_conf.dst_ip_addr, tcp);
+
+        var octetstring eth_payload := f_IPv4_enc_eth(v_IPv4_packet);
+        var OCT2 checksum := f_IPv4_checksum(eth_payload);
+        eth_payload[10] := checksum[0];
+        eth_payload[11] := checksum[1];
+
+        var ASP_LANL2 v_ASP_LANL2;
+        v_ASP_LANL2.type_field := '0800'O;
+        v_ASP_LANL2.eth_dst_addr := ip_conf.dst_mac_addr;
+        v_ASP_LANL2.eth_src_addr := omit;
+        v_ASP_LANL2.payload := eth_payload;
+
+        eth := v_ASP_LANL2;
+        port.setstate(0);
+    } with {
+        extension "prototype(fast)"
+    }
+
+    function f_set_ip_conf(in IpConf c, out ASP_LANL2 eth) port TcpPort {
+        ip_conf := c;
+        port.setstate(4);
+    } with {
+        extension "prototype(fast)"
+    }
+
+    template IPv4_header t_ipv4_header_any := {
+        ver := 4,
+        hlen := ?,
+        tos := ?,
+        tlen := ?, // calculated
+        id := ?,
+        res := ?,
+        dfrag := ?,
+        mfrag := ?,
+        foffset := ?,
+        ttl := ?,
+        proto := ?,
+        cksum := ?,
+        srcaddr := ?,
+        dstaddr := ?
+    }
+
+    function dec_ASP_LANL2(in ASP_LANL2 eth, out PDU_TCP tcp) {
+        var PDU_TCP v_PDU_TCP;
+        var IPv4_packet v_IPv4_packet := f_IPv4_dec(eth.payload);
+        if (v_IPv4_packet.header.proto == 6) { // TCP
+            v_PDU_TCP := f_dec_PDU_TCP(v_IPv4_packet.payload);
+            tcp := v_PDU_TCP;
+            port.setstate(0);
+            return;
+        }
+        port.setstate(1);
+    } with {
+        extension "prototype(fast)"
+    }
+
+    function dec_ASP_v2_LANL2(in ASP_v2_LANL2 eth, out PDU_TCP tcp) {
+        var PDU_TCP v_PDU_TCP;
+        var IPv4_packet v_IPv4_packet := f_IPv4_dec(eth.payload);
+        if (v_IPv4_packet.header.proto == 6) { // TCP
+            v_PDU_TCP := f_dec_PDU_TCP(v_IPv4_packet.payload);
+            tcp := v_PDU_TCP;
+            port.setstate(0);
+            return;
+        }
+        port.setstate(1);
+    } with {
+        extension "prototype(fast)"
+    }
+
+    control {
+        execute(tc_TCP_handshake());
+    }
+}
